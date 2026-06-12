@@ -121,3 +121,5 @@ Main outputs are written to:
 - `outputs/metrics/`
 - `outputs/equity/`
 - `outputs/plots/`
+
+The main readable result tables are summarized in `result.md`.
