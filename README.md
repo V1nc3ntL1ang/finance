@@ -45,6 +45,12 @@ This project studies a simple index timing task. The workflow is organized as a 
 
    The final comparison is reported on the test period.
 
+6. Feature importance layer
+
+   `scripts/analyze_feature_importance.py` fits a Random Forest on the training
+   split and ranks the current 28 feature columns. This is a diagnostic step,
+   not an additional trading model.
+
 ## Current Results
 
 Best test return among the searched ML combinations:
@@ -96,6 +102,12 @@ To rerun only the model and feature-group search:
 
 ```bash
 python scripts/run_feature_group_ablation.py
+```
+
+To rerun only the feature importance diagnostic:
+
+```bash
+python scripts/analyze_feature_importance.py
 ```
 
 The number of workers can be controlled with:

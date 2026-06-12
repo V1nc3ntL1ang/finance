@@ -18,6 +18,7 @@ STEPS = [
     ("ml ablation plots", "plot_ml_ablation.py"),
     ("feature group ablation metrics", "run_feature_group_ablation.py"),
     ("feature group ablation plots", "plot_feature_group_ablation.py"),
+    ("feature importance", "analyze_feature_importance.py"),
 ]
 
 

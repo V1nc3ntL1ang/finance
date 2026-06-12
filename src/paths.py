@@ -24,15 +24,19 @@ BASELINE_METRICS_CSV = METRICS_DIR / "baseline_metrics.csv"
 ML_METRICS_CSV = METRICS_DIR / "ml_metrics.csv"
 ML_ABLATION_METRICS_CSV = METRICS_DIR / "ml_ablation_metrics.csv"
 FEATURE_GROUP_ABLATION_METRICS_CSV = METRICS_DIR / "feature_group_ablation_metrics.csv"
+FEATURE_IMPORTANCE_CSV = METRICS_DIR / "feature_importance.csv"
 
 BASELINE_EQUITY_CSV = EQUITY_DIR / "baseline_equity.csv"
 ML_EQUITY_CSV = EQUITY_DIR / "ml_equity.csv"
+
+FEATURE_IMPORTANCE_PLOT = PLOTS_DIR / "feature_importance.png"
 
 
 def ensure_output_dirs() -> None:
     for path in [
         METRICS_DIR,
         EQUITY_DIR,
+        PLOTS_DIR,
         BASELINE_PLOTS_DIR,
         ML_PLOTS_DIR,
         ABLATION_PLOTS_DIR,
