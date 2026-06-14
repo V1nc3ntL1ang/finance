@@ -7,15 +7,17 @@ import numpy as np
 import pandas as pd
 
 
-LOWER_PROB_CANDIDATES = [0.35, 0.40, 0.45, 0.50]
-UPPER_PROB_CANDIDATES = [0.50, 0.55, 0.60, 0.65]
-LOWER_RANK_CANDIDATES = [0.20, 0.30, 0.40]
-UPPER_RANK_CANDIDATES = [0.60, 0.70, 0.80]
-CENTER_PROB_CANDIDATES = [0.45, 0.50, 0.55]
-SHARPNESS_CANDIDATES = [8.0, 12.0, 16.0]
-MIN_POSITION_CANDIDATES = [0.0, 0.25, 0.50]
-MAX_POSITION_CANDIDATES = [0.75, 1.0]
-SMOOTHING_WINDOW_CANDIDATES = [1, 3, 5]
+LOWER_PROB_CANDIDATES = [0.30, 0.35, 0.40, 0.45, 0.50]
+UPPER_PROB_CANDIDATES = [0.50, 0.55, 0.60, 0.65, 0.70]
+LOWER_RANK_CANDIDATES = [0.15, 0.20, 0.25, 0.30, 0.35, 0.40]
+UPPER_RANK_CANDIDATES = [0.60, 0.65, 0.70, 0.75, 0.80, 0.85]
+CENTER_PROB_CANDIDATES = [0.40, 0.45, 0.50, 0.55, 0.60]
+SHARPNESS_CANDIDATES = [4.0, 8.0, 12.0, 16.0, 20.0]
+POWER_CANDIDATES = [0.5, 1.0, 1.5, 2.0, 3.0]
+MIN_POSITION_CANDIDATES = [0.0, 0.1, 0.2, 0.25, 0.3, 0.4, 0.5]
+MAX_POSITION_CANDIDATES = [0.6, 0.7, 0.75, 0.8, 0.9, 1.0]
+SMOOTHING_WINDOW_CANDIDATES = [1, 2, 3, 5, 7, 10]
+SMOOTHING_METHOD_CANDIDATES = ["sma", "ewma"]
 
 
 def iter_position_policy_candidates() -> Iterator[dict[str, float | int | str]]:
@@ -24,15 +26,18 @@ def iter_position_policy_candidates() -> Iterator[dict[str, float | int | str]]:
             if min_position > max_position:
                 continue
             for smoothing_window in SMOOTHING_WINDOW_CANDIDATES:
-                yield from _iter_linear_candidates(min_position, max_position, smoothing_window)
-                yield from _iter_rank_candidates(min_position, max_position, smoothing_window)
-                yield from _iter_sigmoid_candidates(min_position, max_position, smoothing_window)
+                for smoothing_method in SMOOTHING_METHOD_CANDIDATES:
+                    yield from _iter_linear_candidates(min_position, max_position, smoothing_window, smoothing_method)
+                    yield from _iter_rank_candidates(min_position, max_position, smoothing_window, smoothing_method)
+                    yield from _iter_sigmoid_candidates(min_position, max_position, smoothing_window, smoothing_method)
+                    yield from _iter_power_candidates(min_position, max_position, smoothing_window, smoothing_method)
 
 
 def _iter_linear_candidates(
     min_position: float,
     max_position: float,
     smoothing_window: int,
+    smoothing_method: str,
 ) -> Iterator[dict[str, float | int | str]]:
     for lower_prob in LOWER_PROB_CANDIDATES:
         for upper_prob in UPPER_PROB_CANDIDATES:
@@ -45,6 +50,7 @@ def _iter_linear_candidates(
                 "min_position": min_position,
                 "max_position": max_position,
                 "smoothing_window": smoothing_window,
+                "smoothing_method": smoothing_method,
             }
 
 
@@ -52,6 +58,7 @@ def _iter_rank_candidates(
     min_position: float,
     max_position: float,
     smoothing_window: int,
+    smoothing_method: str,
 ) -> Iterator[dict[str, float | int | str]]:
     for lower_rank in LOWER_RANK_CANDIDATES:
         for upper_rank in UPPER_RANK_CANDIDATES:
@@ -64,6 +71,7 @@ def _iter_rank_candidates(
                 "min_position": min_position,
                 "max_position": max_position,
                 "smoothing_window": smoothing_window,
+                "smoothing_method": smoothing_method,
             }
 
 
@@ -71,6 +79,7 @@ def _iter_sigmoid_candidates(
     min_position: float,
     max_position: float,
     smoothing_window: int,
+    smoothing_method: str,
 ) -> Iterator[dict[str, float | int | str]]:
     for center_prob in CENTER_PROB_CANDIDATES:
         for sharpness in SHARPNESS_CANDIDATES:
@@ -81,7 +90,31 @@ def _iter_sigmoid_candidates(
                 "min_position": min_position,
                 "max_position": max_position,
                 "smoothing_window": smoothing_window,
+                "smoothing_method": smoothing_method,
             }
+
+
+def _iter_power_candidates(
+    min_position: float,
+    max_position: float,
+    smoothing_window: int,
+    smoothing_method: str,
+) -> Iterator[dict[str, float | int | str]]:
+    for lower_prob in LOWER_PROB_CANDIDATES:
+        for upper_prob in UPPER_PROB_CANDIDATES:
+            if lower_prob >= upper_prob:
+                continue
+            for power in POWER_CANDIDATES:
+                yield {
+                    "mapping_type": "power",
+                    "lower_prob": lower_prob,
+                    "upper_prob": upper_prob,
+                    "power": power,
+                    "min_position": min_position,
+                    "max_position": max_position,
+                    "smoothing_window": smoothing_window,
+                    "smoothing_method": smoothing_method,
+                }
 
 
 def build_position(signal: pd.Series, params: Mapping[str, float | int | str]) -> pd.Series:
@@ -89,6 +122,7 @@ def build_position(signal: pd.Series, params: Mapping[str, float | int | str]) -
     min_position = float(params["min_position"])
     max_position = float(params["max_position"])
     smoothing_window = int(params["smoothing_window"])
+    smoothing_method = str(params.get("smoothing_method", "sma"))
 
     if min_position > max_position:
         raise ValueError("min_position must be <= max_position")
@@ -120,10 +154,19 @@ def build_position(signal: pd.Series, params: Mapping[str, float | int | str]) -
             min_position=min_position,
             max_position=max_position,
         )
+    elif mapping_type == "power":
+        raw_position = _power_mapping(
+            signal,
+            lower=float(params["lower_prob"]),
+            upper=float(params["upper_prob"]),
+            power=float(params["power"]),
+            min_position=min_position,
+            max_position=max_position,
+        )
     else:
         raise ValueError(f"Unknown mapping_type: {mapping_type}")
 
-    return smooth_position(raw_position, smoothing_window)
+    return smooth_position(raw_position, smoothing_window, smoothing_method)
 
 
 def expanding_percentile_rank(signal: pd.Series) -> pd.Series:
@@ -142,8 +185,13 @@ def expanding_percentile_rank(signal: pd.Series) -> pd.Series:
     return pd.Series(scores, index=signal.index, dtype=float)
 
 
-def smooth_position(position: pd.Series, smoothing_window: int) -> pd.Series:
-    smoothed = position.rolling(window=smoothing_window, min_periods=1).mean()
+def smooth_position(position: pd.Series, smoothing_window: int, method: str = "sma") -> pd.Series:
+    if method == "sma":
+        smoothed = position.rolling(window=smoothing_window, min_periods=1).mean()
+    elif method == "ewma":
+        smoothed = position.ewm(span=smoothing_window, adjust=False).mean()
+    else:
+        raise ValueError(f"Unknown smoothing method: {method}")
     return smoothed.clip(lower=0.0, upper=1.0).fillna(0.0)
 
 
@@ -176,4 +224,21 @@ def _sigmoid(
     max_position: float,
 ) -> pd.Series:
     scaled = 1.0 / (1.0 + np.exp(-sharpness * (signal.astype(float) - center)))
+    return min_position + scaled * (max_position - min_position)
+
+
+def _power_mapping(
+    signal: pd.Series,
+    *,
+    lower: float,
+    upper: float,
+    power: float,
+    min_position: float,
+    max_position: float,
+) -> pd.Series:
+    if lower >= upper:
+        raise ValueError("lower must be < upper")
+    
+    normalized = ((signal.astype(float) - lower) / (upper - lower)).clip(lower=0.0, upper=1.0)
+    scaled = normalized ** power
     return min_position + scaled * (max_position - min_position)

@@ -7,6 +7,7 @@ from pathlib import Path
 import pandas as pd
 from joblib import Parallel, delayed
 from sklearn.metrics import accuracy_score
+from tqdm import tqdm
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -58,6 +59,7 @@ def evaluate_combination(
         df,
         probability,
         buy_hold_valid_metrics=valid_buy_hold_metrics,
+        model_name=f"{model_name}/{group_name}",
     )
     position = build_position(probability, mapping_params)
     test_equity = run_backtest(df, position, test_start=TEST_START)
@@ -90,6 +92,7 @@ def evaluate_combination(
 
 def main() -> None:
     ensure_output_dirs()
+    print("Feature Group Ablation - 加载数据集...")
     df = load_dataset()
     train = df[df["split"] == "train"]
     valid = df[df["split"] == "valid"]
@@ -110,7 +113,14 @@ def main() -> None:
         for group_name, feature_columns in FEATURE_GROUPS.items()
         for model_name in get_ml_models(n_jobs=1)
     ]
+    
     worker_count = get_worker_count()
+    total_tasks = len(tasks)
+    
+    print(f"\n开始评估 {total_tasks} 个组合 (workers={worker_count})...")
+    print(f"  特征组: {list(FEATURE_GROUPS.keys())}")
+    print(f"  模型: {list(get_ml_models(n_jobs=1).keys())}")
+    
     rows = Parallel(n_jobs=worker_count)(
         delayed(evaluate_combination)(
             group_name,
@@ -126,12 +136,23 @@ def main() -> None:
             valid_buy_hold_metrics,
             buy_hold_return,
         )
-        for group_name, feature_columns, model_name in tasks
+        for group_name, feature_columns, model_name in tqdm(tasks, desc="组合评估", unit="组合")
     )
 
     metrics = pd.DataFrame(rows)
     write_metrics_csv(metrics, FEATURE_GROUP_ABLATION_METRICS_CSV)
-    print(f"wrote {FEATURE_GROUP_ABLATION_METRICS_CSV} rows={len(metrics)} workers={worker_count}")
+    
+    print(f"\n完成!")
+    print(f"  写入 {FEATURE_GROUP_ABLATION_METRICS_CSV} rows={len(metrics)} workers={worker_count}")
+    
+    # 显示结果摘要 - Top 10
+    print("\nTop 10 结果:")
+    top_results = metrics.sort_values("cumulative_return", ascending=False).head(10)
+    for i, (_, row) in enumerate(top_results.iterrows(), 1):
+        print(f"  {i}. {row['model']}/{row['feature_group']}: "
+              f"return={row['cumulative_return']:.2%}, "
+              f"sharpe={row['sharpe']:.2f}, "
+              f"excess={row['excess_return_vs_buy_hold']:.2%}")
 
 
 if __name__ == "__main__":
