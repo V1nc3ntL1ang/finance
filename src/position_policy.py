@@ -14,6 +14,7 @@ UPPER_RANK_CANDIDATES = [0.60, 0.65, 0.70, 0.75, 0.80, 0.85]
 CENTER_PROB_CANDIDATES = [0.40, 0.45, 0.50, 0.55, 0.60]
 SHARPNESS_CANDIDATES = [4.0, 8.0, 12.0, 16.0, 20.0]
 POWER_CANDIDATES = [0.5, 1.0, 1.5, 2.0, 3.0]
+THRESHOLD_CANDIDATES = [0.45, 0.48, 0.50, 0.52, 0.55, 0.58, 0.60]
 MIN_POSITION_CANDIDATES = [0.0, 0.1, 0.2, 0.25, 0.3, 0.4, 0.5]
 MAX_POSITION_CANDIDATES = [0.6, 0.7, 0.75, 0.8, 0.9, 1.0]
 SMOOTHING_WINDOW_CANDIDATES = [1, 2, 3, 5, 7, 10]
@@ -31,6 +32,7 @@ def iter_position_policy_candidates() -> Iterator[dict[str, float | int | str]]:
                     yield from _iter_rank_candidates(min_position, max_position, smoothing_window, smoothing_method)
                     yield from _iter_sigmoid_candidates(min_position, max_position, smoothing_window, smoothing_method)
                     yield from _iter_power_candidates(min_position, max_position, smoothing_window, smoothing_method)
+                    yield from _iter_threshold_candidates(min_position, max_position, smoothing_window, smoothing_method)
 
 
 def _iter_linear_candidates(
@@ -117,6 +119,23 @@ def _iter_power_candidates(
                 }
 
 
+def _iter_threshold_candidates(
+    min_position: float,
+    max_position: float,
+    smoothing_window: int,
+    smoothing_method: str,
+) -> Iterator[dict[str, float | int | str]]:
+    for threshold in THRESHOLD_CANDIDATES:
+        yield {
+            "mapping_type": "threshold",
+            "threshold": threshold,
+            "min_position": min_position,
+            "max_position": max_position,
+            "smoothing_window": smoothing_window,
+            "smoothing_method": smoothing_method,
+        }
+
+
 def build_position(signal: pd.Series, params: Mapping[str, float | int | str]) -> pd.Series:
     mapping_type = str(params["mapping_type"])
     min_position = float(params["min_position"])
@@ -160,6 +179,13 @@ def build_position(signal: pd.Series, params: Mapping[str, float | int | str]) -
             lower=float(params["lower_prob"]),
             upper=float(params["upper_prob"]),
             power=float(params["power"]),
+            min_position=min_position,
+            max_position=max_position,
+        )
+    elif mapping_type == "threshold":
+        raw_position = _threshold_mapping(
+            signal,
+            threshold=float(params["threshold"]),
             min_position=min_position,
             max_position=max_position,
         )
@@ -238,7 +264,21 @@ def _power_mapping(
 ) -> pd.Series:
     if lower >= upper:
         raise ValueError("lower must be < upper")
-    
+
     normalized = ((signal.astype(float) - lower) / (upper - lower)).clip(lower=0.0, upper=1.0)
     scaled = normalized ** power
     return min_position + scaled * (max_position - min_position)
+
+
+def _threshold_mapping(
+    signal: pd.Series,
+    *,
+    threshold: float,
+    min_position: float,
+    max_position: float,
+) -> pd.Series:
+    return pd.Series(
+        np.where(signal.astype(float) >= threshold, max_position, min_position),
+        index=signal.index,
+        dtype=float,
+    )

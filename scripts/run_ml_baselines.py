@@ -7,23 +7,18 @@ from pathlib import Path
 import pandas as pd
 from joblib import Parallel, delayed
 from sklearn.metrics import accuracy_score, roc_auc_score
+from tqdm import tqdm
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.backtest import compute_metrics, run_backtest, write_equity_csv, write_metrics_csv
+from src.experiment_config import RETURN_WEIGHT, SELECTION_OBJECTIVE, SHARPE_WEIGHT, TEST_START, VALID_START
 from src.ml_models import get_ml_models
 from src.model_features import MODEL_FEATURE_COLUMNS
 from src.paths import ML_DATASET_CSV, ML_EQUITY_CSV, ML_METRICS_CSV, ensure_output_dirs
 from src.position_policy import build_position, iter_position_policy_candidates
-
-
-VALID_START = pd.Timestamp("2024-01-01")
-TEST_START = pd.Timestamp("2025-01-01")
-SELECTION_OBJECTIVE = "weighted_valid_return_sharpe"
-RETURN_WEIGHT = 0.5
-SHARPE_WEIGHT = 0.5
 
 
 def get_worker_count() -> int:
@@ -48,6 +43,7 @@ def choose_exposure_mapping(
     df: pd.DataFrame,
     probability: pd.Series,
     *,
+    model_name: str,
     buy_hold_valid_metrics: dict[str, float],
 ) -> tuple[dict[str, float], dict[str, float], dict[str, float]]:
     buy_hold_return = buy_hold_valid_metrics["cumulative_return"]
@@ -69,8 +65,17 @@ def choose_exposure_mapping(
         return params.copy(), metrics, scores
 
     candidates = list(iter_position_policy_candidates())
-    results = Parallel(n_jobs=get_worker_count(), prefer="threads")(
+    result_iter = Parallel(n_jobs=get_worker_count(), prefer="threads", return_as="generator")(
         delayed(evaluate_params)(params) for params in candidates
+    )
+    results = list(
+        tqdm(
+            result_iter,
+            total=len(candidates),
+            desc=f"{model_name} policy",
+            unit="policy",
+            dynamic_ncols=True,
+        )
     )
 
     best_params, best_metrics, best_scores = max(
@@ -103,6 +108,7 @@ def evaluate_model(
     mapping_params, valid_backtest_metrics, valid_selection_scores = choose_exposure_mapping(
         df,
         probability,
+        model_name=model_name,
         buy_hold_valid_metrics=valid_buy_hold_metrics,
     )
     position = build_position(probability, mapping_params)
@@ -155,20 +161,21 @@ def main() -> None:
     )
 
     model_names = list(get_ml_models(n_jobs=worker_count))
-    results = Parallel(n_jobs=min(worker_count, len(model_names)), prefer="processes")(
-        delayed(evaluate_model)(
-            model_name,
-            df,
-            train,
-            valid,
-            test,
-            y_train,
-            y_valid,
-            y_test,
-            valid_buy_hold_metrics,
+    results = []
+    for model_name in tqdm(model_names, desc="models", unit="model", dynamic_ncols=True):
+        results.append(
+            evaluate_model(
+                model_name,
+                df,
+                train,
+                valid,
+                test,
+                y_train,
+                y_valid,
+                y_test,
+                valid_buy_hold_metrics,
+            )
         )
-        for model_name in model_names
-    )
 
     metrics_rows = [row for row, _equity in results]
     equity_frames = [equity for _row, equity in results]

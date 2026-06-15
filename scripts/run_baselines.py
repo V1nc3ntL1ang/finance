@@ -10,14 +10,21 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.backtest import compute_metrics, run_backtest, write_equity_csv, write_metrics_csv
-from src.features import read_feature_csv
-from src.paths import BASELINE_EQUITY_CSV, BASELINE_METRICS_CSV, DAILY_FEATURES_CSV, ensure_output_dirs
+from src.paths import BASELINE_EQUITY_CSV, BASELINE_METRICS_CSV, ML_DATASET_CSV, ensure_output_dirs
 from src.strategies.baselines import BASELINE_STRATEGIES
+
+
+def load_dataset() -> pd.DataFrame:
+    df = pd.read_csv(ML_DATASET_CSV)
+    df["date"] = pd.to_datetime(df["date"], format="%Y/%m/%d")
+    numeric_columns = [column for column in df.columns if column not in {"date", "split"}]
+    df[numeric_columns] = df[numeric_columns].apply(pd.to_numeric)
+    return df.sort_values("date").reset_index(drop=True)
 
 
 def main() -> None:
     ensure_output_dirs()
-    df = read_feature_csv(DAILY_FEATURES_CSV)
+    df = load_dataset()
     metrics_rows: list[dict[str, float | str]] = []
     equity_frames: list[pd.DataFrame] = []
 

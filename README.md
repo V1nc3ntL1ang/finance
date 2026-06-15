@@ -28,15 +28,28 @@ This project studies a simple index timing task. The workflow is organized as a 
 
 4. Position policy layer
 
-   Model probabilities are converted into positions with continuous mappings:
+   Model probabilities are converted into positions with searched mappings:
 
    - `linear_clipped`
    - `rank_linear`
    - `sigmoid`
+   - `power`
+   - `threshold`
 
-   The search also includes `smoothing_window = 1, 3, 5`, where `1` means no smoothing.
+   The search also includes `smoothing_window = 1, 2, 3, 5, 7, 10`, where
+   `1` means no smoothing, and `smoothing_method = sma` or `ewma`.
 
 5. Evaluation layer
+
+   The final comparison uses `data/processed/ml_dataset.csv` for both
+   baselines and ML models, so every reported strategy shares the same
+   supervised-learning test period:
+
+   ```text
+   train: 2017-06-01 to 2023-12-29
+   valid: 2024-01-02 to 2024-12-31
+   test:  2025-01-02 to 2026-04-24
+   ```
 
    Parameters are selected on the validation period using:
 
@@ -44,7 +57,8 @@ This project studies a simple index timing task. The workflow is organized as a 
    valid_selection_score = 0.5 * valid_return_score + 0.5 * valid_sharpe_score
    ```
 
-   The final comparison is reported on the test period.
+   The final comparison is reported only on the test period. The same-period
+   buy-and-hold return is 99.28%.
 
 6. Feature importance layer
 
@@ -61,10 +75,18 @@ hist_gradient_boosting + explicit 20 feature-engineering features
 mapping = rank_linear
 smoothing_window = 1
 
-test_return = 115.36%
-max_drawdown = -5.87%
-sharpe = 3.84
-excess_vs_buy_hold = +16.08%
+test_return = 110.16%
+max_drawdown = -5.85%
+sharpe = 3.83
+excess_vs_buy_hold = +10.88%
+```
+
+Same-period buy-and-hold:
+
+```text
+test_return = 99.28%
+max_drawdown = -17.26%
+sharpe = 2.18
 ```
 
 Best test Sharpe:
@@ -74,15 +96,15 @@ hist_gradient_boosting + explicit 20 feature-engineering features
 mapping = rank_linear
 smoothing_window = 1
 
-test_return = 115.36%
-max_drawdown = -5.87%
-sharpe = 3.84
+test_return = 110.16%
+max_drawdown = -5.85%
+sharpe = 3.83
 ```
 
 Best LightGBM combinations:
 
 ```text
-current explicit features: lightgbm, test_return = 80.74%, sharpe = 2.07
+current explicit features: lightgbm, test_return = 96.01%, sharpe = 2.61
 historical feature-set leader: lightgbm + momentum, test_return = 105.13%, sharpe = 2.77
 ```
 
