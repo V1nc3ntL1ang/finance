@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import random
 from bisect import bisect_right, insort
 from collections.abc import Iterator, Mapping
 
@@ -20,6 +21,27 @@ MAX_POSITION_CANDIDATES = [0.6, 0.7, 0.75, 0.8, 0.9, 1.0]
 SMOOTHING_WINDOW_CANDIDATES = [1, 2, 3, 5, 7, 10]
 SMOOTHING_METHOD_CANDIDATES = ["sma", "ewma"]
 
+LOCKED_ALIGNMENT_CONFIRMATION_MODEL = "hist_gradient_boosting_alignment_confirmation"
+LOCKED_ALIGNMENT_CONFIRMATION_POLICY = {
+    "mapping_type": "rank_confirmation",
+    "entry_rank": 0.50,
+    "exit_rank": 0.4875,
+    "confirm_days": 2,
+    "min_position": 0.0,
+    "max_position": 1.0,
+    "smoothing_window": 1,
+    "smoothing_method": "sma",
+    "regime_floor_feature": "ma_alignment",
+    "regime_floor_threshold": 0.5,
+    "regime_floor_position": 1.0,
+}
+
+
+def get_locked_policy_for_model(model_name: str) -> dict[str, float | int | str] | None:
+    if model_name != LOCKED_ALIGNMENT_CONFIRMATION_MODEL:
+        return None
+    return LOCKED_ALIGNMENT_CONFIRMATION_POLICY.copy()
+
 
 def iter_position_policy_candidates() -> Iterator[dict[str, float | int | str]]:
     for min_position in MIN_POSITION_CANDIDATES:
@@ -33,6 +55,33 @@ def iter_position_policy_candidates() -> Iterator[dict[str, float | int | str]]:
                     yield from _iter_sigmoid_candidates(min_position, max_position, smoothing_window, smoothing_method)
                     yield from _iter_power_candidates(min_position, max_position, smoothing_window, smoothing_method)
                     yield from _iter_threshold_candidates(min_position, max_position, smoothing_window, smoothing_method)
+
+
+def list_position_policy_candidates() -> list[dict[str, float | int | str]]:
+    return list(iter_position_policy_candidates())
+
+
+def sample_position_policy_candidates(
+    candidates: list[dict[str, float | int | str]],
+    sample_per_mapping: int,
+    seed: int,
+) -> list[dict[str, float | int | str]]:
+    if sample_per_mapping <= 0:
+        raise ValueError("sample_per_mapping must be positive")
+
+    grouped: dict[str, list[dict[str, float | int | str]]] = {}
+    for candidate in candidates:
+        grouped.setdefault(str(candidate["mapping_type"]), []).append(candidate)
+
+    rng = random.Random(seed)
+    sampled: list[dict[str, float | int | str]] = []
+    for mapping_type in sorted(grouped):
+        group = grouped[mapping_type]
+        if len(group) <= sample_per_mapping:
+            sampled.extend(group)
+        else:
+            sampled.extend(rng.sample(group, sample_per_mapping))
+    return sampled
 
 
 def _iter_linear_candidates(
@@ -189,10 +238,39 @@ def build_position(signal: pd.Series, params: Mapping[str, float | int | str]) -
             min_position=min_position,
             max_position=max_position,
         )
+    elif mapping_type == "rank_confirmation":
+        raw_position = _rank_confirmation(
+            signal,
+            entry_rank=float(params["entry_rank"]),
+            exit_rank=float(params["exit_rank"]),
+            confirm_days=int(params["confirm_days"]),
+            min_position=min_position,
+            max_position=max_position,
+        )
     else:
         raise ValueError(f"Unknown mapping_type: {mapping_type}")
 
     return smooth_position(raw_position, smoothing_window, smoothing_method)
+
+
+def build_policy_position(
+    df: pd.DataFrame,
+    signal: pd.Series,
+    params: Mapping[str, float | int | str],
+) -> pd.Series:
+    position = build_position(signal, params)
+    floor_feature = params.get("regime_floor_feature")
+    if floor_feature is None:
+        return position
+
+    floor_feature_name = str(floor_feature)
+    if floor_feature_name not in df.columns:
+        raise ValueError(f"regime floor feature missing from dataset: {floor_feature_name}")
+
+    floor_threshold = float(params["regime_floor_threshold"])
+    floor_position = float(params["regime_floor_position"])
+    regime_mask = df[floor_feature_name].astype(float) > floor_threshold
+    return position.mask(regime_mask & (position < floor_position), floor_position).clip(lower=0.0, upper=1.0)
 
 
 def expanding_percentile_rank(signal: pd.Series) -> pd.Series:
@@ -282,3 +360,35 @@ def _threshold_mapping(
         index=signal.index,
         dtype=float,
     )
+
+
+def _rank_confirmation(
+    signal: pd.Series,
+    *,
+    entry_rank: float,
+    exit_rank: float,
+    confirm_days: int,
+    min_position: float,
+    max_position: float,
+) -> pd.Series:
+    if confirm_days < 1:
+        raise ValueError("confirm_days must be >= 1")
+    if exit_rank > entry_rank:
+        raise ValueError("exit_rank must be <= entry_rank")
+
+    rank_score = expanding_percentile_rank(signal)
+    state = min_position
+    entry_count = 0
+    exit_count = 0
+    values: list[float] = []
+
+    for value in rank_score:
+        entry_count = entry_count + 1 if value >= entry_rank else 0
+        exit_count = exit_count + 1 if value <= exit_rank else 0
+        if state < max_position and entry_count >= confirm_days:
+            state = max_position
+        elif state > min_position and exit_count >= confirm_days:
+            state = min_position
+        values.append(state)
+
+    return pd.Series(values, index=rank_score.index, dtype=float)

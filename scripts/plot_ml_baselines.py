@@ -13,6 +13,8 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from src.paths import BASELINE_EQUITY_CSV, ML_EQUITY_CSV, ML_METRICS_CSV, ML_PLOTS_DIR, ensure_output_dirs
 
 INITIAL_CAPITAL = 100000.0
+BEST_MODEL_SORT_COLUMNS = ["valid_selection_score", "valid_cumulative_return"]
+LOCKED_POLICY_SELECTION = "locked_multifold_min_score"
 
 
 def load_outputs() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
@@ -67,7 +69,26 @@ def plot_ml_drawdowns(ml_equity: pd.DataFrame) -> Path:
 
 
 def plot_best_ml_vs_baselines(baseline_equity: pd.DataFrame, ml_equity: pd.DataFrame, ml_metrics: pd.DataFrame) -> Path:
-    best_model = ml_metrics.sort_values("sharpe", ascending=False).iloc[0]["model"]
+    missing_columns = [column for column in BEST_MODEL_SORT_COLUMNS if column not in ml_metrics.columns]
+    if missing_columns:
+        raise ValueError(f"ml_metrics missing best-model columns: {', '.join(missing_columns)}")
+
+    if "policy_selection" in ml_metrics.columns:
+        locked_metrics = ml_metrics[ml_metrics["policy_selection"] == LOCKED_POLICY_SELECTION]
+    else:
+        locked_metrics = pd.DataFrame()
+    if locked_metrics.empty:
+        selected_model = ml_metrics.sort_values(
+            BEST_MODEL_SORT_COLUMNS,
+            ascending=[False, False],
+            kind="mergesort",
+        ).iloc[0]["model"]
+        selected_label = f"best_ml: {selected_model}"
+        title = "Best ML by Valid Selection Score vs Key Tradable Baselines"
+    else:
+        selected_model = locked_metrics.sort_values("cumulative_return", ascending=False).iloc[0]["model"]
+        selected_label = f"locked_ml: {selected_model}"
+        title = "Locked ML Strategy vs Key Tradable Baselines"
     max_ml_date = ml_equity["date"].max()
 
     fig, ax = plt.subplots(figsize=(11, 6))
@@ -78,10 +99,10 @@ def plot_best_ml_vs_baselines(baseline_equity: pd.DataFrame, ml_equity: pd.DataF
         ]
         ax.plot(strategy_df["date"], strategy_df["equity"] / INITIAL_CAPITAL, label=strategy)
 
-    best_model_df = ml_equity[ml_equity["model"] == best_model]
-    ax.plot(best_model_df["date"], best_model_df["equity"] / INITIAL_CAPITAL, label=f"best_ml: {best_model}")
+    selected_model_df = ml_equity[ml_equity["model"] == selected_model]
+    ax.plot(selected_model_df["date"], selected_model_df["equity"] / INITIAL_CAPITAL, label=selected_label)
 
-    ax.set_title("Best ML Baseline vs Key Tradable Baselines")
+    ax.set_title(title)
     ax.set_xlabel("Date")
     ax.set_ylabel("Equity Multiple")
     ax.grid(True, alpha=0.25)

@@ -39,8 +39,11 @@ def show_experiment(recorder: ExperimentRecorder, exp_id: str):
     if exp["notes"]:
         print(f"\n备注: {exp['notes']}")
     if exp["metrics"]:
-        print("\n最佳结果:")
+        print("\n最佳结果（按 Valid 综合分选择）:")
         print(f"  模型: {exp['metrics']['best_model']}")
+        print(f"  Valid综合分: {exp['metrics'].get('valid_selection_score', 0):.4f}")
+        print(f"  Valid累计收益: {exp['metrics'].get('valid_cumulative_return', 0):.2%}")
+        print(f"  Valid夏普: {exp['metrics'].get('valid_sharpe', 0):.2f}")
         print(f"  累计收益: {exp['metrics']['cumulative_return']:.2%}")
         print(f"  最大回撤: {exp['metrics']['max_drawdown']:.2%}")
         print(f"  夏普比率: {exp['metrics']['sharpe']:.2f}")
@@ -52,7 +55,17 @@ def compare_experiments(recorder: ExperimentRecorder, exp_ids: list[str]):
     if df.empty:
         print("未找到实验")
         return
-    print(df[["exp_id", "name", "cumulative_return", "max_drawdown", "sharpe"]].to_string(index=False))
+    columns = [
+        "exp_id",
+        "name",
+        "valid_selection_score",
+        "valid_cumulative_return",
+        "cumulative_return",
+        "max_drawdown",
+        "sharpe",
+    ]
+    existing_columns = [column for column in columns if column in df.columns]
+    print(df[existing_columns].to_string(index=False))
 
 
 def main():

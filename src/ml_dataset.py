@@ -41,6 +41,7 @@ OUTPUT_COLUMNS = [
     "amount",
     "ret_1d",
     "ma20",
+    "ma_alignment",
     *FEATURE_COLUMNS,
     *TARGET_COLUMNS,
     "split",
@@ -99,6 +100,7 @@ def write_ml_dataset(df: pd.DataFrame, path: Path) -> None:
     output = df.copy()
     output["date"] = output["date"].dt.strftime("%Y/%m/%d")
     output["volume"] = output["volume"].round().astype("Int64")
+    output["ma_alignment"] = output["ma_alignment"].astype("Int64")
     for column in ["open", "high", "low", "close", "amount"]:
         output[column] = output[column].map(lambda value: f"{value:.2f}")
     for column in ["ret_1d", "ma20", *FEATURE_COLUMNS, "future_ret_5d"]:

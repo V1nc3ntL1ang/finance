@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import os
 import subprocess
 import sys
@@ -22,7 +23,18 @@ STEPS = [
 ]
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Run the full finance timing workflow.")
+    parser.add_argument("--record", action="store_true", help="Record this run after the workflow finishes.")
+    parser.add_argument("--name", help="Experiment name for non-interactive recording.")
+    parser.add_argument("--purpose", help="Experiment purpose for non-interactive recording.")
+    parser.add_argument("--optimization", action="append", default=[], help="Optimization label; can be repeated.")
+    parser.add_argument("--notes", default="", help="Optional experiment notes.")
+    return parser.parse_args()
+
+
 def main() -> None:
+    args = parse_args()
     total_steps = len(STEPS)
     run_started = time.perf_counter()
     worker_count = os.cpu_count() or 1
@@ -55,11 +67,24 @@ def main() -> None:
     run_elapsed = time.perf_counter() - run_started
     print(f"\ncompleted {total_steps} steps in {run_elapsed:.1f}s", flush=True)
 
+    if not args.record:
+        return
+
     try:
         from src.experiment_recorder import ExperimentRecorder
-
         recorder = ExperimentRecorder()
-        recorder.record_interactive(runtime=run_elapsed)
+
+        if args.name and args.purpose:
+            exp_id = recorder.record(
+                name=args.name,
+                purpose=args.purpose,
+                optimizations=args.optimization,
+                notes=args.notes,
+                runtime=run_elapsed,
+            )
+            print(f"recorded experiment: {exp_id}", flush=True)
+        else:
+            recorder.record_interactive(runtime=run_elapsed)
     except ImportError as e:
         print(f"警告: 无法导入实验记录器 - {e}")
 

@@ -56,6 +56,16 @@ def get_ml_models(n_jobs: int | None = None) -> OrderedDict[str, object]:
                 ),
             ),
             (
+                "hist_gradient_boosting_alignment_confirmation",
+                HistGradientBoostingClassifier(
+                    max_iter=150,
+                    learning_rate=0.05,
+                    max_leaf_nodes=8,
+                    min_samples_leaf=38,
+                    random_state=RANDOM_STATE,
+                ),
+            ),
+            (
                 "lightgbm",
                 LGBMClassifier(
                     objective="binary",

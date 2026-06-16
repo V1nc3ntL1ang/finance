@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import subprocess
-import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -31,28 +30,51 @@ class ExperimentRecorder:
         try:
             return subprocess.check_output(
                 ["git", "rev-parse", "HEAD"],
-                capture_output=True,
                 text=True,
+                stderr=subprocess.DEVNULL,
                 cwd=Path(__file__).resolve().parents[1],
             ).strip()
         except Exception:
             return "unknown"
 
-    def _extract_best_model(self) -> dict[str, float]:
+    def _extract_best_model(self) -> dict[str, Any]:
         from src.paths import ML_METRICS_CSV
 
         if ML_METRICS_CSV.exists():
             df = pd.read_csv(ML_METRICS_CSV)
-            best_idx = df["sharpe"].idxmax()
+            required_columns = {"valid_selection_score", "valid_cumulative_return"}
+            if not required_columns.issubset(df.columns):
+                return {}
+
+            locked = (
+                df[df["policy_selection"] == "locked_multifold_min_score"]
+                if "policy_selection" in df.columns
+                else pd.DataFrame()
+            )
+            if locked.empty:
+                best_idx = df.sort_values(
+                    ["valid_selection_score", "valid_cumulative_return"],
+                    ascending=[False, False],
+                    kind="mergesort",
+                ).index[0]
+                selection_rule = "max(valid_selection_score, valid_cumulative_return)"
+            else:
+                best_idx = locked.sort_values("cumulative_return", ascending=False, kind="mergesort").index[0]
+                selection_rule = "locked_multifold_min_score"
+
             best = df.iloc[best_idx]
             return {
-                "best_model": best["model"],
-                "cumulative_return": best["cumulative_return"],
-                "max_drawdown": best["max_drawdown"],
-                "sharpe": best["sharpe"],
-                "excess_return": best.get("excess_return_vs_buy_hold", 0),
-                "test_accuracy": best.get("test_accuracy", 0),
-                "test_auc": best.get("test_auc", 0),
+                "selection_rule": selection_rule,
+                "best_model": str(best["model"]),
+                "valid_selection_score": float(best["valid_selection_score"]),
+                "valid_cumulative_return": float(best["valid_cumulative_return"]),
+                "valid_sharpe": float(best.get("valid_sharpe", 0)),
+                "cumulative_return": float(best["cumulative_return"]),
+                "max_drawdown": float(best["max_drawdown"]),
+                "sharpe": float(best["sharpe"]),
+                "excess_return": float(best.get("excess_return_vs_buy_hold", 0)),
+                "test_accuracy": float(best.get("test_accuracy", 0)),
+                "test_auc": float(best.get("test_auc", 0)),
             }
         return {}
 
@@ -121,6 +143,25 @@ class ExperimentRecorder:
             "notes": notes,
         }
 
+    def record(
+        self,
+        *,
+        name: str,
+        purpose: str,
+        optimizations: list[str] | None = None,
+        runtime: float | None = None,
+        notes: str = "",
+        params: dict[str, Any] | None = None,
+    ) -> str:
+        return self.create_experiment(
+            name=name,
+            purpose=purpose,
+            optimizations=optimizations or [],
+            notes=notes,
+            runtime=runtime or 0,
+            params=params,
+        )
+
     def create_experiment(
         self,
         name: str,
@@ -160,6 +201,8 @@ class ExperimentRecorder:
             "timestamp": experiment["timestamp"],
             "runtime": experiment["runtime"],
             "best_model": experiment["metrics"].get("best_model", ""),
+            "valid_selection_score": experiment["metrics"].get("valid_selection_score", ""),
+            "valid_cumulative_return": experiment["metrics"].get("valid_cumulative_return", ""),
             "cumulative_return": experiment["metrics"].get("cumulative_return", ""),
             "max_drawdown": experiment["metrics"].get("max_drawdown", ""),
             "sharpe": experiment["metrics"].get("sharpe", ""),
@@ -195,8 +238,9 @@ class ExperimentRecorder:
 
         exp = self.experiments[0]
         if exp and exp["metrics"]:
-            print("\n📊 本次实验最佳结果:")
+            print("\n📊 本次实验最佳结果（按 Valid 综合分选择）:")
             print(f"   最佳模型: {exp['metrics']['best_model']}")
+            print(f"   Valid综合分: {exp['metrics']['valid_selection_score']:.4f}")
             print(f"   累计收益: {exp['metrics']['cumulative_return']:.2%}")
             print(f"   最大回撤: {exp['metrics']['max_drawdown']:.2%}")
             print(f"   夏普比率: {exp['metrics']['sharpe']:.2f}")
@@ -223,6 +267,7 @@ class ExperimentRecorder:
                 "runtime": f"{exp['runtime']:.1f}s" if exp["runtime"] else "N/A",
                 "optimizations": ", ".join(exp["optimizations"]),
                 "best_model": exp["metrics"].get("best_model", "N/A"),
+                "valid_selection_score": f"{exp['metrics']['valid_selection_score']:.4f}" if exp["metrics"].get("valid_selection_score") else "N/A",
                 "cumulative_return": f"{exp['metrics']['cumulative_return']:.2%}" if exp["metrics"].get("cumulative_return") else "N/A",
                 "sharpe": f"{exp['metrics']['sharpe']:.2f}" if exp["metrics"].get("sharpe") else "N/A",
             })
