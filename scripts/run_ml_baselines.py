@@ -239,6 +239,7 @@ def evaluate_final_model(
     labeled: pd.DataFrame,
     trading: pd.DataFrame,
     params: dict[str, float | int | str],
+    selected_candidate_index: int,
     validation_summary: pd.Series,
     validation_label_metrics: dict[str, float],
     worker_count: int,
@@ -281,6 +282,7 @@ def evaluate_final_model(
         "investment_start": TEST_START.strftime("%Y/%m/%d"),
         "investment_end": INVESTMENT_END.strftime("%Y/%m/%d"),
         "trading_days": len(equity),
+        "selected_candidate_index": selected_candidate_index,
         "selected_mapping_type": str(params["mapping_type"]),
         "selected_policy_params": policy_to_json(params),
         "valid_score": float(validation_summary["valid_score"]),
@@ -294,7 +296,9 @@ def evaluate_final_model(
         "test_accuracy": float(accuracy_score(test_labels["future_up_5d"], test_pred)),
         "test_auc": safe_auc(test_labels["future_up_5d"], test_probability),
         "buy_hold_cumulative_return": buy_hold_metrics["cumulative_return"],
-        "excess_return_vs_buy_hold": metrics["cumulative_return"] - buy_hold_metrics["cumulative_return"],
+        "excess_return_pp_vs_buy_hold": metrics["cumulative_return"] - buy_hold_metrics["cumulative_return"],
+        "relative_wealth_ratio_vs_buy_hold": (1 + metrics["cumulative_return"])
+        / (1 + buy_hold_metrics["cumulative_return"]),
         **metrics,
     }
 
@@ -349,7 +353,10 @@ def main() -> None:
             model_validation_rows.extend(fold_rows)
             validation_label_metrics.update(fold_label_metrics)
 
-        best_index, validation_summary = select_policy(model_validation_rows)
+        best_index, validation_summary = select_policy(
+            model_validation_rows,
+            expected_candidate_indices=range(len(candidates)),
+        )
         best_params = candidates[best_index]
         print(
             f"[{model_name}] selected candidate={best_index} mapping={best_params['mapping_type']} "
@@ -363,6 +370,7 @@ def main() -> None:
             labeled,
             trading,
             best_params,
+            best_index,
             validation_summary,
             validation_label_metrics,
             worker_count,
@@ -372,7 +380,7 @@ def main() -> None:
         all_validation_rows.extend(model_validation_rows)
         print(
             f"[{model_name}] final_return={metric_row['cumulative_return']:.6f} "
-            f"excess={metric_row['excess_return_vs_buy_hold']:.6f} "
+            f"excess_pp={metric_row['excess_return_pp_vs_buy_hold']:.6f} "
             f"max_dd={metric_row['max_drawdown']:.6f}",
             flush=True,
         )

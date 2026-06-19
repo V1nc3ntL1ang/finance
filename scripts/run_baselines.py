@@ -63,7 +63,8 @@ def main() -> None:
 
     metrics = pd.DataFrame(metrics_rows)
     buy_hold_return = float(metrics.loc[metrics["strategy"] == "buy_hold", "cumulative_return"].iloc[0])
-    metrics["excess_return_vs_buy_hold"] = metrics["cumulative_return"] - buy_hold_return
+    metrics["excess_return_pp_vs_buy_hold"] = metrics["cumulative_return"] - buy_hold_return
+    metrics["relative_wealth_ratio_vs_buy_hold"] = (1 + metrics["cumulative_return"]) / (1 + buy_hold_return)
 
     write_metrics_csv(metrics, BASELINE_METRICS_CSV)
     write_equity_csv(pd.concat(equity_frames, ignore_index=True), BASELINE_EQUITY_CSV)

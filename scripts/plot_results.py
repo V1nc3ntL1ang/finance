@@ -16,6 +16,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.backtest import INITIAL_CAPITAL
+from src.experiment_protocol import sort_by_formal_validation_score
 from src.paths import (
     BASELINE_EQUITY_CSV,
     BASELINE_METRICS_CSV,
@@ -202,8 +203,12 @@ def plot_all_ml_baselines(
     return finish_equity_plot(fig, ax, "Panel B: Machine-Learning Baselines vs Buy-and-Hold", ML_BASELINES_PLOT)
 
 
-def select_best_name(metrics: pd.DataFrame, name_column: str) -> str:
+def select_best_by_return(metrics: pd.DataFrame, name_column: str) -> str:
     return str(metrics.sort_values("cumulative_return", ascending=False, kind="mergesort").iloc[0][name_column])
+
+
+def select_best_by_validation(metrics: pd.DataFrame, name_column: str) -> str:
+    return str(sort_by_formal_validation_score(metrics).iloc[0][name_column])
 
 
 def plot_final_comparison(
@@ -214,8 +219,8 @@ def plot_final_comparison(
     stable_hgb_equity: pd.DataFrame,
     stable_hgb_metrics: pd.DataFrame,
 ) -> Path:
-    best_baseline = select_best_name(baseline_metrics, "strategy")
-    best_ml = select_best_name(ml_metrics, "model")
+    best_baseline = select_best_by_return(baseline_metrics, "strategy")
+    best_ml = select_best_by_validation(ml_metrics, "model")
 
     fig, ax = plt.subplots(figsize=(11.5, 6.4))
 
@@ -237,7 +242,7 @@ def plot_final_comparison(
         best_ml_equity["date"],
         best_ml_equity["equity"] / INITIAL_CAPITAL,
         label=label_with_return(
-            f"Best ML baseline: {ML_LABELS.get(best_ml, best_ml)}",
+            f"Validation-selected ML baseline: {ML_LABELS.get(best_ml, best_ml)}",
             float(best_ml_metric["cumulative_return"]),
         ),
         **ML_STYLES.get(best_ml, ML_STYLES["hist_gradient_boosting"]),
@@ -261,8 +266,8 @@ def plot_drawdown_references(
     ml_metrics: pd.DataFrame,
     stable_hgb_equity: pd.DataFrame,
 ) -> Path:
-    best_baseline = select_best_name(baseline_metrics, "strategy")
-    best_ml = select_best_name(ml_metrics, "model")
+    best_baseline = select_best_by_return(baseline_metrics, "strategy")
+    best_ml = select_best_by_validation(ml_metrics, "model")
 
     fig, ax = plt.subplots(figsize=(11.5, 6.4))
 
@@ -274,7 +279,7 @@ def plot_drawdown_references(
         ),
         (
             ml_equity[ml_equity["model"] == best_ml],
-            f"Best ML baseline: {ML_LABELS.get(best_ml, best_ml)}",
+            f"Validation-selected ML baseline: {ML_LABELS.get(best_ml, best_ml)}",
             ML_STYLES.get(best_ml, ML_STYLES["hist_gradient_boosting"]),
         ),
         (
@@ -406,15 +411,15 @@ def plot_stable_hgb_position(stable_hgb_equity: pd.DataFrame) -> Path:
     ax_position = ax_equity.twinx()
     ax_position.step(
         stable_hgb_equity["date"],
-        stable_hgb_equity["position"],
+        stable_hgb_equity["executed_position"],
         where="post",
-        label="Target position",
+        label="Executed position",
         **POSITION_STYLE,
     )
     ax_position.fill_between(
         stable_hgb_equity["date"],
         0,
-        stable_hgb_equity["position"],
+        stable_hgb_equity["executed_position"],
         step="post",
         color=PALETTE["cyan"],
         alpha=0.10,

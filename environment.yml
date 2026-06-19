@@ -1,4 +1,4 @@
-name: finance-stablehgb
+name: finance-StableHGB
 channels:
   - conda-forge
 dependencies:

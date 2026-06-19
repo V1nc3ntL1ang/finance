@@ -11,8 +11,16 @@ import pandas as pd
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT_ROOT))
+
+from src.experiment_protocol import sort_by_formal_validation_score
 
 STEPS = [
+    ("Environment check", "scripts/check_environment.py"),
+    ("Smoke tests", "scripts/run_tests.py"),
+    ("Build daily data from raw text", "scripts/build_daily_from_raw.py"),
+    ("Build daily features", "scripts/build_daily_features.py"),
+    ("Build machine-learning dataset", "scripts/build_ml_dataset.py"),
     ("Panel A baselines", "scripts/run_baselines.py"),
     ("Panel B machine-learning baselines", "scripts/run_ml_baselines.py"),
     ("Panel C StableHGB", "scripts/run_stable_hgb.py"),
@@ -49,7 +57,7 @@ def print_summary() -> None:
     stable_hgb = pd.read_csv(PROJECT_ROOT / "outputs/metrics/stable_hgb_metrics.csv")
 
     best_baseline = baseline.sort_values("cumulative_return", ascending=False).iloc[0]
-    best_ml = ml.sort_values("cumulative_return", ascending=False).iloc[0]
+    best_ml = sort_by_formal_validation_score(ml).iloc[0]
     stable = stable_hgb.iloc[0]
 
     print("\n=== Formal result summary ===", flush=True)
@@ -70,7 +78,7 @@ def print_summary() -> None:
     print(
         f"StableHGB: {stable['strategy']} "
         f"return={stable['cumulative_return']:.4f} "
-        f"excess={stable['excess_return_vs_buy_hold']:.4f} "
+        f"excess_pp={stable['excess_return_pp_vs_buy_hold']:.4f} "
         f"max_dd={stable['max_drawdown']:.4f} "
         f"sharpe={stable['sharpe']:.4f}",
         flush=True,
@@ -85,6 +93,14 @@ def main() -> None:
     env = os.environ.copy()
     env["PYTHONUNBUFFERED"] = "1"
     env["FINANCE_WORKERS"] = str(args.workers)
+    for thread_variable in [
+        "LOKY_MAX_CPU_COUNT",
+        "OMP_NUM_THREADS",
+        "OPENBLAS_NUM_THREADS",
+        "VECLIB_MAXIMUM_THREADS",
+        "NUMEXPR_NUM_THREADS",
+    ]:
+        env[thread_variable] = str(args.workers)
 
     print(
         f"experiment workflow started: workers={args.workers} cwd={PROJECT_ROOT}",

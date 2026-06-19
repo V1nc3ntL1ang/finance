@@ -260,8 +260,11 @@ def expanding_percentile_rank(signal: pd.Series) -> pd.Series:
             continue
 
         value_float = float(value)
+        if not sorted_values:
+            scores.append(0.5)
+        else:
+            scores.append(bisect_right(sorted_values, value_float) / len(sorted_values))
         insort(sorted_values, value_float)
-        scores.append(bisect_right(sorted_values, value_float) / len(sorted_values))
 
     return pd.Series(scores, index=signal.index, dtype=float)
 

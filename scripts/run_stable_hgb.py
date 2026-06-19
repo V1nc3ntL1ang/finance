@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pandas as pd
 from sklearn.metrics import accuracy_score
+from tqdm import tqdm
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -20,18 +21,18 @@ from src.experiment_protocol import (
     FORMAL_SELECTION_RULE_DESCRIPTION,
     INVESTMENT_END,
     VALIDATION_FOLDS,
-    add_formal_validation_score,
     get_worker_count,
     load_formal_frames,
     policy_to_json,
     safe_auc,
     score_metrics,
+    select_policy,
 )
 from src.stable_hgb import (
     STABLE_HGB_MODEL_NAME,
     STABLE_HGB_MODEL_PARAMS,
     STABLE_HGB_STRATEGY_NAME,
-    get_stable_hgb_policy_params,
+    list_stable_hgb_policy_candidates,
 )
 from src.paths import (
     STABLE_HGB_EQUITY_CSV,
@@ -49,12 +50,12 @@ MODEL_PARAMS = STABLE_HGB_MODEL_PARAMS
 
 def evaluate_validation_fold(
     labeled: pd.DataFrame,
-    policy: dict[str, float | int | str],
+    candidates: list[dict[str, float | int | str]],
     fold_name: str,
     fold_start: pd.Timestamp,
     fold_end: pd.Timestamp,
     worker_count: int,
-) -> tuple[dict[str, float | int | str], dict[str, float]]:
+) -> tuple[list[dict[str, float | int | str]], dict[str, float]]:
     train = labeled[labeled["target_end_date"] < fold_start]
     valid_labels = labeled[
         (labeled["date"] >= fold_start)
@@ -65,7 +66,8 @@ def evaluate_validation_fold(
         raise ValueError(f"{fold_name} has empty train or validation labels")
 
     print(
-        f"[{MODEL_NAME}] {fold_name}: train_labels={len(train)} valid_labels={len(valid_labels)}",
+        f"[{MODEL_NAME}] {fold_name}: train_labels={len(train)} "
+        f"valid_labels={len(valid_labels)} candidates={len(candidates)}",
         flush=True,
     )
 
@@ -73,13 +75,38 @@ def evaluate_validation_fold(
     model.fit(train[FEATURE_COLUMNS], train["future_up_5d"])
     probability = pd.Series(model.predict_proba(labeled[FEATURE_COLUMNS])[:, 1], index=labeled.index)
 
-    position = build_policy_position(labeled, probability, policy)
     buy_hold_position = pd.Series(1.0, index=labeled.index)
     buy_hold_metrics = compute_metrics(
         run_backtest(labeled, buy_hold_position, test_start=fold_start, test_end=fold_end)
     )
-    metrics = compute_metrics(run_backtest(labeled, position, test_start=fold_start, test_end=fold_end))
-    scores = score_metrics(metrics, buy_hold_metrics)
+
+    rows: list[dict[str, float | int | str]] = []
+    for candidate_index, policy in tqdm(
+        list(enumerate(candidates)),
+        desc=f"{MODEL_NAME} {fold_name}",
+        unit="policy",
+        dynamic_ncols=True,
+    ):
+        position = build_policy_position(labeled, probability, policy)
+        metrics = compute_metrics(run_backtest(labeled, position, test_start=fold_start, test_end=fold_end))
+        scores = score_metrics(metrics, buy_hold_metrics)
+        rows.append(
+            {
+                "model": MODEL_NAME,
+                "strategy": STRATEGY_NAME,
+                "fold": fold_name,
+                "candidate_index": candidate_index,
+                "policy_params": policy_to_json(policy),
+                "mapping_type": str(policy["mapping_type"]),
+                **scores,
+                "valid_cumulative_return": metrics["cumulative_return"],
+                "valid_annualized_return": metrics["annualized_return"],
+                "valid_max_drawdown": metrics["max_drawdown"],
+                "valid_sharpe": metrics["sharpe"],
+                "buy_hold_cumulative_return": buy_hold_metrics["cumulative_return"],
+                "buy_hold_sharpe": buy_hold_metrics["sharpe"],
+            }
+        )
 
     valid_probability = probability.loc[valid_labels.index]
     label_metrics = {
@@ -88,42 +115,14 @@ def evaluate_validation_fold(
         ),
         f"{fold_name}_auc": safe_auc(valid_labels["future_up_5d"], valid_probability),
     }
-    row = {
-        "model": MODEL_NAME,
-        "strategy": STRATEGY_NAME,
-        "fold": fold_name,
-        "policy_params": policy_to_json(policy),
-        "mapping_type": str(policy["mapping_type"]),
-        **scores,
-        "valid_cumulative_return": metrics["cumulative_return"],
-        "valid_annualized_return": metrics["annualized_return"],
-        "valid_max_drawdown": metrics["max_drawdown"],
-        "valid_sharpe": metrics["sharpe"],
-        "buy_hold_cumulative_return": buy_hold_metrics["cumulative_return"],
-        "buy_hold_sharpe": buy_hold_metrics["sharpe"],
-    }
-    return row, label_metrics
-
-
-def summarize_validation(rows: list[dict[str, float | int | str]]) -> dict[str, float]:
-    validation = pd.DataFrame(rows)
-    summary = {
-        "valid_min_score": float(validation["valid_selection_score"].min()),
-        "valid_mean_score": float(validation["valid_selection_score"].mean()),
-        "valid_mean_return": float(validation["valid_cumulative_return"].mean()),
-        "valid_return_std": float(validation["valid_cumulative_return"].std()),
-        "valid_mean_sharpe": float(validation["valid_sharpe"].mean()),
-        "valid_worst_drawdown": float(validation["valid_max_drawdown"].min()),
-    }
-    scored = add_formal_validation_score(pd.DataFrame([summary])).iloc[0]
-    summary["valid_score"] = float(scored["valid_score"])
-    return summary
+    return rows, label_metrics
 
 
 def evaluate_final_strategy(
     labeled: pd.DataFrame,
     trading: pd.DataFrame,
     policy: dict[str, float | int | str],
+    selected_candidate_index: int,
     validation_summary: dict[str, float],
     validation_label_metrics: dict[str, float],
     worker_count: int,
@@ -140,6 +139,17 @@ def evaluate_final_strategy(
     position = build_policy_position(trading, trading_probability, policy)
     equity = run_backtest(trading, position, test_start=TEST_START)
     metrics = compute_metrics(equity)
+    cost_sensitivity: dict[str, float] = {}
+    for cost_bps in [5, 10, 20]:
+        cost_equity = run_backtest(
+            trading,
+            position,
+            test_start=TEST_START,
+            transaction_cost_bps=float(cost_bps),
+        )
+        cost_metrics = compute_metrics(cost_equity)
+        cost_sensitivity[f"cost_{cost_bps}bps_cumulative_return"] = cost_metrics["cumulative_return"]
+        cost_sensitivity[f"cost_{cost_bps}bps_max_drawdown"] = cost_metrics["max_drawdown"]
 
     buy_hold_position = pd.Series(1.0, index=trading.index)
     buy_hold_metrics = compute_metrics(run_backtest(trading, buy_hold_position, test_start=TEST_START))
@@ -171,6 +181,7 @@ def evaluate_final_strategy(
         "investment_start": TEST_START.strftime("%Y/%m/%d"),
         "investment_end": INVESTMENT_END.strftime("%Y/%m/%d"),
         "trading_days": len(equity),
+        "selected_candidate_index": selected_candidate_index,
         "selected_mapping_type": str(policy["mapping_type"]),
         "selected_policy_params": policy_to_json(policy),
         **validation_summary,
@@ -178,7 +189,10 @@ def evaluate_final_strategy(
         "test_accuracy": float(accuracy_score(test_labels["future_up_5d"], test_pred)),
         "test_auc": safe_auc(test_labels["future_up_5d"], test_probability),
         "buy_hold_cumulative_return": buy_hold_metrics["cumulative_return"],
-        "excess_return_vs_buy_hold": metrics["cumulative_return"] - buy_hold_metrics["cumulative_return"],
+        "excess_return_pp_vs_buy_hold": metrics["cumulative_return"] - buy_hold_metrics["cumulative_return"],
+        "relative_wealth_ratio_vs_buy_hold": (1 + metrics["cumulative_return"])
+        / (1 + buy_hold_metrics["cumulative_return"]),
+        **cost_sensitivity,
         **metrics,
     }
 
@@ -191,11 +205,12 @@ def main() -> None:
     ensure_output_dirs()
     worker_count = get_worker_count()
     labeled, trading = load_formal_frames()
-    policy = get_stable_hgb_policy_params()
+    candidates = list_stable_hgb_policy_candidates()
 
     print(
         f"StableHGB protocol: workers={worker_count} model={MODEL_NAME} "
-        f"folds={len(VALIDATION_FOLDS)} final_train_cutoff={FINAL_MODEL_TRAIN_CUTOFF.date()}",
+        f"folds={len(VALIDATION_FOLDS)} candidates={len(candidates)} "
+        f"final_train_cutoff={FINAL_MODEL_TRAIN_CUTOFF.date()}",
         flush=True,
     )
     print(
@@ -207,7 +222,7 @@ def main() -> None:
         f"trading: {trading['date'].min().date()}..{trading['date'].max().date()} rows={len(trading)}",
         flush=True,
     )
-    print(f"StableHGB policy: {policy}", flush=True)
+    print("StableHGB policy search: fixed 108-candidate local grid", flush=True)
 
     model_names = set(get_ml_models(n_jobs=worker_count))
     if MODEL_NAME not in model_names:
@@ -216,28 +231,42 @@ def main() -> None:
     validation_rows: list[dict[str, float | int | str]] = []
     validation_label_metrics: dict[str, float] = {}
     for fold_name, fold_start, fold_end in VALIDATION_FOLDS:
-        row, fold_label_metrics = evaluate_validation_fold(
+        fold_rows, fold_label_metrics = evaluate_validation_fold(
             labeled,
-            policy,
+            candidates,
             fold_name,
             fold_start,
             fold_end,
             worker_count,
         )
-        validation_rows.append(row)
+        validation_rows.extend(fold_rows)
         validation_label_metrics.update(fold_label_metrics)
+        best_fold_row = max(fold_rows, key=lambda item: item["valid_selection_score"])
         print(
-            f"[{MODEL_NAME}] {fold_name}: return={row['valid_cumulative_return']:.6f} "
-            f"score={row['valid_selection_score']:.6f}",
+            f"[{MODEL_NAME}] {fold_name}: best_candidate={best_fold_row['candidate_index']} "
+            f"return={best_fold_row['valid_cumulative_return']:.6f} "
+            f"score={best_fold_row['valid_selection_score']:.6f}",
             flush=True,
         )
 
-    validation_summary = summarize_validation(validation_rows)
+    best_index, validation_summary = select_policy(
+        validation_rows,
+        expected_candidate_indices=range(len(candidates)),
+    )
+    policy = candidates[best_index]
+    print(
+        f"[{MODEL_NAME}] selected candidate={best_index} "
+        f"valid_score={validation_summary['valid_score']:.6f} "
+        f"worst_drawdown={validation_summary['valid_worst_drawdown']:.6f} "
+        f"policy={policy}",
+        flush=True,
+    )
     metric_row, equity = evaluate_final_strategy(
         labeled,
         trading,
         policy,
-        validation_summary,
+        best_index,
+        dict(validation_summary),
         validation_label_metrics,
         worker_count,
     )
@@ -251,7 +280,7 @@ def main() -> None:
 
     print(
         f"[{MODEL_NAME}] final_return={metric_row['cumulative_return']:.6f} "
-        f"excess={metric_row['excess_return_vs_buy_hold']:.6f} "
+        f"excess_pp={metric_row['excess_return_pp_vs_buy_hold']:.6f} "
         f"max_dd={metric_row['max_drawdown']:.6f}",
         flush=True,
     )

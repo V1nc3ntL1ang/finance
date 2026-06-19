@@ -48,6 +48,7 @@ FEATURE_OUTPUT_COLUMNS = [
 OUTPUT_COLUMNS = [
     *FEATURE_OUTPUT_COLUMNS,
     *TARGET_COLUMNS,
+    "target_end_date",
     "split",
 ]
 
@@ -99,12 +100,13 @@ def build_ml_dataset(daily: pd.DataFrame) -> pd.DataFrame:
     df = add_ml_features(daily)
 
     df["future_ret_5d"] = df["close"].shift(-5) / df["close"] - 1
+    df["target_end_date"] = df["date"].shift(-5)
     df = df.dropna(subset=FEATURE_COLUMNS + ["future_ret_5d"]).reset_index(drop=True)
     df["future_up_5d"] = (df["future_ret_5d"] > 0).astype(int)
 
     df["split"] = "train"
-    df.loc[df["date"] >= pd.Timestamp("2024-01-01"), "split"] = "valid"
-    df.loc[df["date"] >= pd.Timestamp("2025-01-01"), "split"] = "test"
+    df.loc[df["target_end_date"] >= pd.Timestamp("2024-01-01"), "split"] = "valid"
+    df.loc[df["target_end_date"] >= pd.Timestamp("2025-01-01"), "split"] = "test"
 
     return df[OUTPUT_COLUMNS]
 
@@ -114,10 +116,11 @@ def write_ml_dataset(df: pd.DataFrame, path: Path) -> None:
 
     output = df.copy()
     output["date"] = output["date"].dt.strftime("%Y/%m/%d")
+    output["target_end_date"] = output["target_end_date"].dt.strftime("%Y/%m/%d")
     output["volume"] = output["volume"].round().astype("Int64")
     output["ma_alignment"] = output["ma_alignment"].astype("Int64")
     for column in ["open", "high", "low", "close", "amount"]:
         output[column] = output[column].map(lambda value: f"{value:.2f}")
     for column in ["ret_1d", "ma20", *FEATURE_COLUMNS, "future_ret_5d"]:
         output[column] = output[column].map(lambda value: f"{value:.10g}")
-    output.to_csv(path, index=False)
+    output.to_csv(path, index=False, lineterminator="\r\n")

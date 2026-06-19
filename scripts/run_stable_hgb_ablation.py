@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from collections.abc import Mapping
 from pathlib import Path
@@ -30,14 +31,15 @@ from src.experiment_protocol import (
     safe_auc,
     score_metrics,
     select_policy,
+    sort_by_formal_validation_score,
 )
 from src.stable_hgb import (
     STABLE_HGB_MODEL_NAME,
     STABLE_HGB_MODEL_PARAMS,
-    get_stable_hgb_policy_params,
 )
 from src.paths import (
     ML_BASELINE_METRICS_CSV,
+    STABLE_HGB_METRICS_CSV,
     STABLE_HGB_ABLATION_CSV,
     STABLE_HGB_ABLATION_MD,
     STABLE_HGB_ABLATION_VALIDATION_CSV,
@@ -64,6 +66,13 @@ def with_trend_position_guard(policy: Mapping[str, float | int | str]) -> dict[s
     result["trend_guard_threshold"] = 0.5
     result["trend_guard_min_position"] = 1.0
     return result
+
+
+def load_panel_c_selected_policy() -> dict[str, float | int | str]:
+    metrics = pd.read_csv(STABLE_HGB_METRICS_CSV)
+    if len(metrics) != 1:
+        raise ValueError(f"expected exactly one StableHGB metrics row in {STABLE_HGB_METRICS_CSV}")
+    return json.loads(str(metrics.iloc[0]["selected_policy_params"]))
 
 
 def summarize_validation_rows(rows: list[dict[str, float | int | str]]) -> pd.Series:
@@ -135,7 +144,10 @@ def search_standard_policy_for_stable_hgb(
             row["model"] = STABLE_HGB_MODEL_NAME
         all_rows.extend(fold_rows)
 
-    best_index, summary = select_policy(all_rows)
+    best_index, summary = select_policy(
+        all_rows,
+        expected_candidate_indices=range(len(candidates)),
+    )
     best_policy = candidates[best_index]
     print(
         f"[component-ablation] selected standard candidate={best_index} "
@@ -219,22 +231,21 @@ def evaluate_policy_on_test(
     scores = score_metrics(metrics, buy_hold_metrics)
     test_pred = (test_probability >= 0.5).astype(int)
 
-    position_on_test = position.loc[equity.index] if position.index.equals(equity.index) else position[trading["date"] >= TEST_START]
-    position_on_test = position_on_test.reset_index(drop=True)
-
     metrics.update(
         {
             "test_accuracy": float(accuracy_score(test_labels["future_up_5d"], test_pred)),
             "test_auc": safe_auc(test_labels["future_up_5d"], test_probability),
             "buy_hold_cumulative_return": buy_hold_metrics["cumulative_return"],
-            "excess_return_vs_buy_hold": metrics["cumulative_return"] - buy_hold_metrics["cumulative_return"],
+            "excess_return_pp_vs_buy_hold": metrics["cumulative_return"] - buy_hold_metrics["cumulative_return"],
+            "relative_wealth_ratio_vs_buy_hold": (1 + metrics["cumulative_return"])
+            / (1 + buy_hold_metrics["cumulative_return"]),
             "test_return_score": scores["valid_return_score"],
             "test_sharpe_score": scores["valid_sharpe_score"],
             "test_selection_score": scores["valid_selection_score"],
-            "mean_position": float(position_on_test.mean()),
-            "turnover": float(position_on_test.diff().abs().fillna(0.0).sum()),
-            "full_position_days": int((position_on_test >= 0.999999).sum()),
-            "zero_position_days": int((position_on_test <= 0.000001).sum()),
+            "mean_position": float(equity["position"].mean()),
+            "turnover": float(equity["position"].diff().abs().fillna(0.0).sum()),
+            "full_position_days": int((equity["position"] >= 0.999999).sum()),
+            "zero_position_days": int((equity["position"] <= 0.000001).sum()),
         }
     )
     return metrics, position
@@ -259,13 +270,14 @@ def make_reference_rows(buy_hold_metrics: dict[str, float]) -> list[dict[str, fl
             "test_accuracy": pd.NA,
             "test_auc": pd.NA,
             "buy_hold_cumulative_return": buy_hold_metrics["cumulative_return"],
-            "excess_return_vs_buy_hold": 0.0,
+            "excess_return_pp_vs_buy_hold": 0.0,
+            "relative_wealth_ratio_vs_buy_hold": 1.0,
             **buy_hold_metrics,
         }
     ]
 
     ml_metrics = pd.read_csv(ML_BASELINE_METRICS_CSV)
-    best_ml = ml_metrics.sort_values("cumulative_return", ascending=False).iloc[0]
+    best_ml = sort_by_formal_validation_score(ml_metrics).iloc[0]
     rows.append(
         {
             "row_order": 2,
@@ -284,7 +296,8 @@ def make_reference_rows(buy_hold_metrics: dict[str, float]) -> list[dict[str, fl
             "test_accuracy": float(best_ml["test_accuracy"]),
             "test_auc": float(best_ml["test_auc"]),
             "buy_hold_cumulative_return": float(best_ml["buy_hold_cumulative_return"]),
-            "excess_return_vs_buy_hold": float(best_ml["excess_return_vs_buy_hold"]),
+            "excess_return_pp_vs_buy_hold": float(best_ml["excess_return_pp_vs_buy_hold"]),
+            "relative_wealth_ratio_vs_buy_hold": float(best_ml["relative_wealth_ratio_vs_buy_hold"]),
             "cumulative_return": float(best_ml["cumulative_return"]),
             "annualized_return": float(best_ml["annualized_return"]),
             "max_drawdown": float(best_ml["max_drawdown"]),
@@ -301,7 +314,7 @@ def build_markdown_table(table: pd.DataFrame) -> str:
             "position_rule",
             "valid_score",
             "cumulative_return",
-            "excess_return_vs_buy_hold",
+            "excess_return_pp_vs_buy_hold",
             "max_drawdown",
             "sharpe",
             "test_auc",
@@ -313,6 +326,11 @@ def build_markdown_table(table: pd.DataFrame) -> str:
             return ""
         return f"{float(value) * 100:.2f}%"
 
+    def fmt_percentage_points(value: object) -> str:
+        if pd.isna(value):
+            return ""
+        return f"{float(value) * 100:.2f} pp"
+
     def fmt_float(value: object) -> str:
         if pd.isna(value):
             return ""
@@ -320,7 +338,7 @@ def build_markdown_table(table: pd.DataFrame) -> str:
 
     display["valid_score"] = display["valid_score"].map(fmt_float)
     display["cumulative_return"] = display["cumulative_return"].map(fmt_percent)
-    display["excess_return_vs_buy_hold"] = display["excess_return_vs_buy_hold"].map(fmt_percent)
+    display["excess_return_pp_vs_buy_hold"] = display["excess_return_pp_vs_buy_hold"].map(fmt_percentage_points)
     display["max_drawdown"] = display["max_drawdown"].map(fmt_percent)
     display["sharpe"] = display["sharpe"].map(lambda value: "" if pd.isna(value) else f"{float(value):.2f}")
     display["test_auc"] = display["test_auc"].map(lambda value: "" if pd.isna(value) else f"{float(value):.3f}")
@@ -329,7 +347,7 @@ def build_markdown_table(table: pd.DataFrame) -> str:
         "Position rule",
         "Valid score",
         "Cumulative return",
-        "Excess vs buy-hold",
+        "Excess vs buy-hold (percentage points)",
         "Max drawdown",
         "Sharpe",
         "Test AUC",
@@ -366,7 +384,7 @@ def main() -> None:
         worker_count,
     )
 
-    stable_hgb_policy = get_stable_hgb_policy_params()
+    stable_hgb_policy = load_panel_c_selected_policy()
     signal_stabilizer_only = without_trend_position_guard(stable_hgb_policy)
     standard_with_guard = with_trend_position_guard(standard_policy)
 
@@ -436,7 +454,7 @@ def main() -> None:
                 "uses_relative_signal_stabilizer": uses_relative_signal_stabilizer,
                 "uses_trend_position_guard": uses_trend_position_guard,
                 "policy_selection": (
-                    "stable_hgb"
+                    "selected_in_panel_c"
                     if row_id == "stable_hgb"
                     else (
                         "selected_from_panel_b_standard_grid_then_trend_guard_added"
