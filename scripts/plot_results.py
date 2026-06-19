@@ -106,12 +106,16 @@ STABLE_HGB_STYLE = {"color": PALETTE["red"], "linestyle": "-", "linewidth": 1.8}
 REFERENCE_LINE = {"color": PALETTE["reference"], "linewidth": 0.8, "alpha": 0.75}
 POSITION_STYLE = {"color": PALETTE["cyan"], "linewidth": 1.2, "alpha": 0.72}
 SCATTER_LABEL_OFFSETS = {
-    "StableHGB": (5, 5),
-    "Buy and hold": (6, 7),
-    "Logistic reg.": (7, 10),
-    "Histogram GB": (7, -10),
-    "20-day momentum timing": (-116, -2),
-    "MA20 and momentum combo": (5, 5),
+    "StableHGB": (18, 0),
+    "Buy and hold": (10, -2),
+    "Logistic reg.": (10, -2),
+    "Random forest": (13, -4),
+    "Histogram GB": (13, -2),
+    "Gradient boosting": (10, -2),
+    "LightGBM": (13, -2),
+    "MA20 timing": (10, -2),
+    "MA20 and momentum combo": (10, -2),
+    "20-day momentum timing": (-120, -4),
 }
 
 
@@ -129,13 +133,13 @@ def label_with_return(name: str, cumulative_return: float) -> str:
     return f"{name} ({format_return(cumulative_return)})"
 
 
-def finish_equity_plot(fig: plt.Figure, ax: plt.Axes, title: str, path: Path) -> Path:
+def finish_equity_plot(fig: plt.Figure, ax: plt.Axes, title: str, path: Path, ncol: int = 1) -> Path:
     ax.axhline(1.0, **REFERENCE_LINE)
     ax.set_title(title)
     ax.set_xlabel("Date")
     ax.set_ylabel("Equity multiple")
     ax.grid(True, alpha=0.22)
-    ax.legend(loc="upper left", frameon=False)
+    ax.legend(loc="upper left", frameon=False, ncol=ncol)
     fig.autofmt_xdate()
     fig.tight_layout()
     fig.savefig(path, dpi=220)
@@ -200,7 +204,7 @@ def plot_all_ml_baselines(
             **ML_STYLES[model],
         )
 
-    return finish_equity_plot(fig, ax, "Panel B: Machine-Learning Baselines vs Buy-and-Hold", ML_BASELINES_PLOT)
+    return finish_equity_plot(fig, ax, "Panel B: Machine-Learning Baselines vs Buy-and-Hold", ML_BASELINES_PLOT, ncol=2)
 
 
 def select_best_by_return(metrics: pd.DataFrame, name_column: str) -> str:
