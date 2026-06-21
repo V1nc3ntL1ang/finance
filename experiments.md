@@ -66,13 +66,13 @@ python -u scripts/run_baselines.py
 
 ## Panel B: Competitive Machine-Learning Methods
 
-Panel B uses the same 20 technical features for every model. The models are selected using rolling validation folds for 2022, 2023, and 2024. For each fold, training labels must end before the validation year begins. The final model is trained with labels whose target window ends before 2024-01-01 and is backtested from 2025-01-01 to 2026-05-06 using daily features through 2026-05-06.
+Panel B uses the same 20 technical features for every model. It evaluates five fixed model specifications; for each model, the probability-to-position policy is selected using rolling validation folds for 2022, 2023, and 2024. For each fold, training labels must end before the validation year begins. The final model is trained with labels whose target window ends before 2024-01-01 and is backtested from 2025-01-01 to 2026-05-06 using daily features through 2026-05-06.
 
 Within each model, candidate policies are first ranked by `valid_score = mean(valid_cumulative_return) - 0.25 * std(valid_cumulative_return)` across the three validation folds. Candidates within 0.02 of the best score are retained, and the final policy is the retained candidate with the least severe worst-fold drawdown.
 
 Panel B only uses standard probability-to-position mappings: `linear_clipped`, `rank_linear`, `sigmoid`, `power`, and `threshold`. It does not use the StableHGB-specific `relative_signal_stabilizer` mapping or the Trend Position Guard.
 
-The recorded Panel B run used 10 workers and a fixed discrete validation grid. The common position parameters are `min_position={0.00,0.10,0.20,0.30}`, `max_position={0.70,0.80,0.90,1.00}`, `smoothing_window={1,3,5}`, and `smoothing_method={sma}`. Combined with the mapping-specific grids, this produces 10,656 candidates per model per validation fold and 159,840 validation rows across all five models and three folds.
+The documented Panel B command is configured with 10 workers and a fixed discrete validation grid. The common position parameters are `min_position={0.00,0.10,0.20,0.30}`, `max_position={0.70,0.80,0.90,1.00}`, `smoothing_window={1,3,5}`, and `smoothing_method={sma}`. Combined with the mapping-specific grids, this produces 10,656 candidates per model per validation fold and 159,840 validation rows across all five models and three folds.
 
 | Mapping | Candidates per Fold |
 |---|---:|
@@ -107,9 +107,9 @@ The trading policy has two components. The Relative Signal Stabilizer converts p
 |---|---|---:|---:|---:|---:|---:|---:|---:|
 | StableHGB | Relative Signal Stabilizer + Trend Position Guard | 0.3164 | 153.44% | 107.52% | -9.84% | 3.38 | 44.22 pp | 0.63 |
 
-Validation fold details:
+Validation fold details. The Return/Sharpe tie-break score is an auxiliary fold-level score used for tie-breaking, not the final cross-fold `valid_score`.
 
-| Fold | Cumulative Return | Selection Score | Max Drawdown | Sharpe | Buy-and-Hold Return |
+| Fold | Cumulative Return | Return/Sharpe Tie-Break Score | Max Drawdown | Sharpe | Buy-and-Hold Return |
 |---|---:|---:|---:|---:|---:|
 | valid_2022 | 30.99% | 1.36 | -22.29% | 1.18 | 22.20% |
 | valid_2023 | 26.80% | 0.70 | -7.39% | 1.99 | 47.60% |
@@ -132,16 +132,18 @@ PYTHONUNBUFFERED=1 FINANCE_WORKERS=10 python -u scripts/run_stable_hgb.py
 
 ## Component Ablation
 
-This ablation fixes the StableHGB histogram gradient boosting model and the same formal train/validation/test protocol. It changes only the position-construction components, so the comparison isolates the contribution of the Relative Signal Stabilizer and the Trend Position Guard.
+This ablation fixes the StableHGB histogram gradient boosting model and the same formal train/validation/test protocol. It changes only the position-construction components, so the comparison provides component-level diagnostic evidence for the Relative Signal Stabilizer and the Trend Position Guard.
 
 | Experiment | Position rule | Valid score | Cumulative return | Excess vs buy-hold (percentage points) | Max drawdown | Sharpe | Test AUC |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | Buy-and-hold reference | constant_full_position |  | 109.21% | 0.00 pp | -17.26% | 2.30 |  |
-| Best ML baseline reference | Panel B linear_clipped | 0.2575 | 105.29% | -3.92 pp | -12.21% | 2.72 | 0.625 |
-| HGB + standard policy | rank_linear | 0.1993 | 82.20% | -27.01 pp | -10.48% | 2.65 | 0.635 |
-| HGB + standard policy + Trend Position Guard | rank_linear + Trend Position Guard | 0.2237 | 106.66% | -2.55 pp | -12.58% | 2.67 | 0.635 |
-| HGB + Relative Signal Stabilizer | Relative Signal Stabilizer | 0.2072 | 121.51% | 12.30 pp | -7.52% | 3.59 | 0.635 |
+| Validation-selected Gradient Boosting | Panel B linear_clipped | 0.2575 | 105.29% | -3.92 pp | -12.21% | 2.72 | 0.625 |
+| StableHGB classifier + standard policy | rank_linear | 0.1993 | 82.20% | -27.01 pp | -10.48% | 2.65 | 0.635 |
+| StableHGB classifier + standard policy + Trend Position Guard | rank_linear + Trend Position Guard | 0.2237 | 106.66% | -2.55 pp | -12.58% | 2.67 | 0.635 |
+| StableHGB classifier + Relative Signal Stabilizer | Relative Signal Stabilizer | 0.2072 | 121.51% | 12.30 pp | -7.52% | 3.59 | 0.635 |
 | StableHGB | Relative Signal Stabilizer + Trend Position Guard | 0.3164 | 153.44% | 44.22 pp | -9.84% | 3.38 | 0.635 |
+
+All ablation headline results use 0 bps transaction cost.
 
 Command:
 

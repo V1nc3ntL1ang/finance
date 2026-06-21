@@ -1,10 +1,10 @@
 # StableHGB: Stable Index Timing with Histogram Gradient Boosting
 
-StableHGB is a machine-learning enhanced index timing strategy for micro-cap stocks (SH#880823). It combines a histogram gradient boosting classifier with two proprietary trading-policy components to deliver superior risk-adjusted returns while maintaining stable portfolio positioning.
+StableHGB is a machine-learning enhanced index timing strategy for the SH#880823 micro-cap index. It combines a histogram gradient boosting classifier with two custom trading-policy components designed to stabilize model signals and preserve market exposure during favorable trends.
 
 ## 📊 Key Results
 
-StableHGB significantly outperforms both simple baselines and competitive machine-learning approaches:
+Under the reported test-period protocol, StableHGB achieved higher observed cumulative return and Sharpe ratio than the reported baseline strategies:
 
 | Strategy | Cumulative Return | Annualized Return | Max Drawdown | Sharpe | Excess vs Buy-and-Hold |
 |---|---:|---:|---:|---:|---:|
@@ -102,7 +102,7 @@ PYTHONUNBUFFERED=1 FINANCE_WORKERS=10 python -u scripts/reproduce_stable_hgb.py
 | Trading days | 321 trading days |
 | Label target | Binary five-trading-day direction `future_up_5d` |
 | Validation | Rolling folds: 2022, 2023, 2024 |
-| Selection rule | `valid_score = mean(return) - 0.25 * std(return)` |
+| Selection rule | `valid_score = mean(return) - 0.25 * std(return)`, keep candidates within 0.02 of the best score, then prefer the least severe worst-fold drawdown |
 | Backtest convention | Close-to-close with `execution_lag=1` |
 
 ## 📋 Experiment Panels
@@ -110,7 +110,7 @@ PYTHONUNBUFFERED=1 FINANCE_WORKERS=10 python -u scripts/reproduce_stable_hgb.py
 | Panel | Focus | Script |
 |---|---|---|
 | **Panel A** | Traditional timing baselines (MA20, momentum) | `scripts/run_baselines.py` |
-| **Panel B** | Competitive ML baselines (LR, RF, GBDT, LGBM) | `scripts/run_ml_baselines.py` |
+| **Panel B** | Competitive ML baselines (LR, RF, GBDT, HGB, LightGBM) | `scripts/run_ml_baselines.py` |
 | **Panel C** | **StableHGB strategy** | `scripts/run_stable_hgb.py` |
 
 ## 📊 Figures
@@ -119,17 +119,17 @@ PYTHONUNBUFFERED=1 FINANCE_WORKERS=10 python -u scripts/reproduce_stable_hgb.py
 |---|---|---|
 | All baselines | Equity curves of traditional strategies | `outputs/plots/all_baselines.png` |
 | ML baselines | Equity curves of ML strategies | `outputs/plots/all_ml_baselines.png` |
-| Risk-return | Scatter plot of strategy candidates | `outputs/plots/risk_return_scatter.png` |
+| Risk-return | Scatter plot of final reported strategies | `outputs/plots/risk_return_scatter.png` |
 | StableHGB vs references | StableHGB performance comparison | `outputs/plots/stable_hgb_vs_references.png` |
 | Drawdown comparison | Drawdown profiles | `outputs/plots/drawdown_stable_hgb_references.png` |
 | StableHGB position | Position and equity over time | `outputs/plots/stable_hgb_position.png` |
 
 ## 📝 Full Results
 
-Complete experiment records and validation details are available in:
+Summary experiment records and StableHGB validation details are available in:
 - `result.md` - Final summary for course report
 - `experiments.md` - Detailed experiment history
 
 ---
 
-*StableHGB achieves +44.22 percentage points excess return over buy-and-hold with a Sharpe ratio of 3.38 and maximum drawdown limited to -9.84%.*
+*Headline results use 0 bps transaction cost. StableHGB achieved +44.22 percentage points excess return over buy-and-hold with a Sharpe ratio of 3.38 and an observed test-period maximum drawdown of -9.84%.*

@@ -31,7 +31,7 @@ Panel A contains tradable baselines without parameter tuning. Panel B and Panel 
 
 ![Panel A Baseline Strategies Equity Curves](outputs/plots/all_baselines.png)
 
-*Figure 1: Equity curves of Panel A baseline strategies. Buy-and-hold achieves the highest cumulative return among baselines, but with the largest drawdown of -17.26%. MA20 timing shows lower volatility with a maximum drawdown of only -10.90%, demonstrating the risk-mitigation effect of simple trend-following rules.*
+*Figure 1: Equity curves of Panel A baseline strategies. Buy-and-hold achieves the highest cumulative return among baselines. MA20 timing records the least severe maximum drawdown at -10.90%, whereas the 20-day momentum strategy records the deepest drawdown at -17.91%.*
 
 ## Panel B: Competitive Machine-Learning Baselines
 
@@ -51,7 +51,7 @@ Panel B uses a 10-worker discrete validation search. Each model evaluates 10,656
 
 ![Risk-Return Scatter of ML Strategies](outputs/plots/risk_return_scatter.png)
 
-*Figure 3: Risk-return scatter plot showing the trade-off between annualized return and maximum drawdown across all evaluated strategies. Points represent individual strategy candidates, with the selected strategies highlighted. StableHGB (highlighted) occupies a favorable position with high return and moderate drawdown.*
+*Figure 3: Risk-return profile of the final reported strategies. The horizontal axis shows maximum-drawdown magnitude, the vertical axis shows cumulative return, and marker size reflects the Sharpe ratio. Each point represents one final reported strategy rather than an individual validation candidate.*
 
 ## Panel C: StableHGB
 
@@ -61,19 +61,19 @@ Panel B uses a 10-worker discrete validation search. Each model evaluates 10,656
 
 ![StableHGB vs Reference Strategies](outputs/plots/stable_hgb_vs_references.png)
 
-*Figure 4: Comparison of StableHGB against buy-and-hold and the best ML baseline (gradient boosting). StableHGB consistently outperforms both references throughout the entire investment period, achieving a cumulative return of 153.44% versus 109.21% for buy-and-hold and 105.29% for gradient boosting.*
+*Figure 4: Comparison of StableHGB against buy-and-hold and the best ML baseline (gradient boosting). StableHGB finishes the investment period with the highest terminal wealth, achieving a cumulative return of 153.44% versus 109.21% for buy-and-hold and 105.29% for gradient boosting.*
 
 ![Drawdown Comparison: StableHGB vs References](outputs/plots/drawdown_stable_hgb_references.png)
 
-*Figure 5: Drawdown comparison between StableHGB, buy-and-hold, and gradient boosting. StableHGB maintains the lowest maximum drawdown (-9.84%) among the three, significantly lower than buy-and-hold's -17.26% and gradient boosting's -12.21%. This demonstrates the effectiveness of the Relative Signal Stabilizer and Trend Position Guard in controlling downside risk.*
+*Figure 5: Drawdown comparison between StableHGB, buy-and-hold, and gradient boosting. StableHGB records a lower observed test-period maximum drawdown (-9.84%) than buy-and-hold (-17.26%) and gradient boosting (-12.21%). Component-level effects are examined separately in the ablation study.*
 
 ![StableHGB Position Over Time](outputs/plots/stable_hgb_position.png)
 
-*Figure 6: StableHGB position over time. The strategy dynamically adjusts positions based on model signals, with the Relative Signal Stabilizer enforcing confirmation days before entering positions and the Trend Position Guard preventing long positions when the trend alignment indicator is unfavorable. This results in fewer but more confident trading decisions.*
+*Figure 6: StableHGB position over time after the configured execution lag. The strategy switches between zero and full exposure. The Relative Signal Stabilizer requires consecutive entry or exit confirmations, while the Trend Position Guard sets exposure to 100% whenever bullish moving-average alignment is active.*
 
 ## Conclusion
 
-Under the final protocol, `StableHGB` is the best tradable strategy:
+Under the final protocol, `StableHGB` has the highest observed return among the evaluated strategies:
 
 ```text
 buy_hold cumulative return = 109.21%
