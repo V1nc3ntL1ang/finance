@@ -5,6 +5,7 @@ __pycache__/
 .venv/
 venv/
 *.log
+*.zip
 experiments/
 outputs/metrics/ml_validation_folds.csv
 outputs/metrics/stable_hgb_ablation_validation.csv
